@@ -507,6 +507,7 @@ apk del grep sed curl fzf git aria2 ffmpeg ncurses
 - yt-dlp - m3u8 Downloader
 - ffmpeg - m3u8 Downloader (fallback)
 - fzf - User interface
+- python3 - Anime-Sama Python Bridge (for `--anime-sama` and `--vf` options)
 - ani-skip (optional)
 - patch - Self updating
 
@@ -526,9 +527,9 @@ Ani-skip uses the external lua script function of mpv and as such â€“ for now â€
 <details>
 	
 * Can I change subtitle language or turn them off? - No, the subtitles are baked into the video.
-* Can I watch dub? - Yes, use `--dub`.
+* Can I watch dub? - Yes, use `--dub`. (In French: `--anime-sama --vf`)
 * Can I change dub language? - No.
-* Can I change media source? - No (unless you can scrape that source yourself).
+* Can I change media source? - Yes. By default, it uses `allanime`. You can use Anime-Sama with `--anime-sama`.
 * Can I use vlc? - Yes, use `--vlc` or `export ANI_CLI_PLAYER=vlc`.
 * Can I adjust resolution? - Yes, use `-q resolution`, for example `ani-cli -q 1080`.
 * How can I download? - Use `-d`, it will download into your working directory.
