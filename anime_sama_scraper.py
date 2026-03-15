@@ -18,20 +18,30 @@ def make_request(url, params=None):
     req = urllib.request.Request(url, headers=HEADERS_BASE)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
-            return response.read().decode('utf-8')
+            return response.read().decode('utf-8', errors='ignore')
     except Exception as e:
         print(f"Error fetching {url}: {e}", file=sys.stderr)
         return ""
 
 def get_active_domain():
-    try:
-        html = make_request("https://anime-sama.pw")
-        match = re.search(r"return\s+['\"](anime-sama\.[a-z]+)['\"]", html)
-        if match:
-            return match.group(1)
-    except:
-        pass
-    return "anime-sama.si"
+    domains = [
+        "anime-sama.to",
+        "anime-sama.tv",
+        "anime-sama.si",
+        "anime-sama.fr",
+        "anime-sama.org",
+        "anime-sama.net"
+    ]
+    for domain in domains:
+        try:
+            req = urllib.request.Request(f"https://{domain}/catalogue/", headers=HEADERS_BASE)
+            with urllib.request.urlopen(req, timeout=5) as response:
+                url = response.geturl()
+                if "catalogue" in url:
+                    return urllib.parse.urlparse(url).netloc
+        except:
+            pass
+    return "anime-sama.to"
 
 def search(query, vf=False):
     domain = get_active_domain()
@@ -45,7 +55,7 @@ def search(query, vf=False):
     
     results = []
     for card in soup.find_all('a', href=True):
-        titre_tag = card.find('h1')
+        titre_tag = card.find(['h1', 'h2'])
         if titre_tag and 'catalogue' in card['href']:
             titre = titre_tag.text.strip()
             # href is something like "/catalogue/naruto/"
@@ -55,8 +65,11 @@ def search(query, vf=False):
                 href = href.replace("vostfr", "vf")
             results.append((href, titre))
             
+    query_unquoted = urllib.parse.unquote_plus(query)
     # Output format compatible with ani-cli parser: "URL\tTITLE"
     for idx, (url, title) in enumerate(results):
+        if query_unquoted and query_unquoted.lower() not in title.lower():
+            continue
         print(f"{url}\t{title}")
 
 def _extract_episodes_from_js(content):
@@ -103,51 +116,83 @@ def episodes(url_path):
     domain = get_active_domain()
     complete_url = f"https://{domain}{url_path}" if url_path.startswith('/') else url_path
     
-    # Needs episodes.js version
     html = make_request(complete_url)
-    filever = "1"
-    match = re.search(r'episodes\.js\?filever=(\d+)', html)
-    if match:
-        filever = match.group(1)
+    if not html:
+        return
         
-    js_url = f"{complete_url}/episodes.js?filever={filever}"
-    if not js_url.startswith('https://'):
-        js_url = f"https://{domain}{url_path}/episodes.js?filever={filever}"
+    vf = "--vf" in sys.argv
+    seasons = []
+    for match in re.finditer(r'panneauAnime\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*\)', html):
+        season_name = match.group(1)
+        subpath = match.group(2)
+        if subpath == "url" or season_name == "nom":
+            continue
+        if vf and "vostfr" in subpath:
+            subpath = subpath.replace("vostfr", "vf")
+        seasons.append((season_name, subpath))
         
-    content = make_request(js_url)
-    
-    # Parse arrays
-    arrays = re.findall(r'var eps(\d+) = \[(.*?)\];', content, re.DOTALL)
-    best_server = None
-    best_episodes = []
-    
-    if arrays:
-        for array_num, array_content in arrays:
-            sibnet_matches = list(re.finditer(r'https://video\.sibnet\.ru/shell\.php\?videoid=(\d+)', array_content))
-            if sibnet_matches and not best_server:
+    if not seasons:
+        seasons.append(("", ""))
+        
+        
+    global_i = 1
+    for season_name, subpath in seasons:
+        season_url = complete_url
+        if subpath:
+            if not season_url.endswith('/'):
+                season_url += '/'
+            season_url += subpath.strip('/') + '/'
+            
+        season_html = html if not subpath else make_request(season_url)
+        if not season_html:
+            continue
+            
+        filever = "1"
+        match = re.search(r'episodes\.js\?filever=(\d+)', season_html)
+        if match:
+            filever = match.group(1)
+            
+        js_url = f"{season_url}episodes.js?filever={filever}" if season_url.endswith('/') else f"{season_url}/episodes.js?filever={filever}"
+        
+        content = make_request(js_url)
+        if not content:
+            continue
+            
+        arrays = re.findall(r'var eps(\d+) = \[(.*?)\];', content, re.DOTALL)
+        best_server = None
+        best_episodes = []
+        
+        if arrays:
+            for array_num, array_content in arrays:
+                sibnet_matches = list(re.finditer(r'https://video\.sibnet\.ru/shell\.php\?videoid=(\d+)', array_content))
+                if sibnet_matches and not best_server:
+                    best_server = 'sibnet'
+                    best_episodes = [(m.group(1), 'sibnet') for m in sibnet_matches]
+                    break
+                    
+                vidmoly_matches = list(re.finditer(r'https://vidmoly\.[a-z]+/embed-([^.]+)\.html', array_content))
+                if vidmoly_matches and not best_server:
+                    best_server = 'vidmoly'
+                    best_episodes = [(m.group(1), 'vidmoly') for m in vidmoly_matches]
+                    
+        if not best_episodes:
+            sibnet_matches = list(re.finditer(r'https://video\.sibnet\.ru/shell\.php\?videoid=(\d+)', content))
+            if sibnet_matches:
                 best_server = 'sibnet'
                 best_episodes = [(m.group(1), 'sibnet') for m in sibnet_matches]
-                break
                 
-            vidmoly_matches = list(re.finditer(r'https://vidmoly\.[a-z]+/embed-([^.]+)\.html', array_content))
-            if vidmoly_matches and not best_server:
-                best_server = 'vidmoly'
-                best_episodes = [(m.group(1), 'vidmoly') for m in vidmoly_matches]
-                
-    if not best_episodes:
-        sibnet_matches = list(re.finditer(r'https://video\.sibnet\.ru/shell\.php\?videoid=(\d+)', content))
-        if sibnet_matches:
-            best_server = 'sibnet'
-            best_episodes = [(m.group(1), 'sibnet') for m in sibnet_matches]
-            
-    episode_names = _extract_episodes_from_js(content)
-    
-    for i, (video_id, server_type) in enumerate(best_episodes):
-        ep_name = episode_names[i] if i < len(episode_names) else f"Episode {i+1}"
-        # Format: "server,video_id    ep_name"
-        print(f"{server_type},{video_id}\t{ep_name}")
+        episode_names = _extract_episodes_from_js(content)
+        
+        for i, (video_id, server_type) in enumerate(best_episodes):
+            ep_name = episode_names[i] if i < len(episode_names) else f"Episode {i+1}"
+            prefix = f"[{season_name}] " if season_name else ""
+            print(f"{global_i}\t{global_i}\t{prefix}{ep_name}\t{server_type},{video_id}")
+            global_i += 1
 
 def extract(server_data):
+    if ',' not in server_data:
+        # Gracefully handle malformed data from bash
+        return
     server_type, video_id = server_data.split(',')
     
     if server_type == 'sibnet':
@@ -167,7 +212,10 @@ def extract(server_data):
                 opener.open(req, timeout=10)
             except urllib.error.HTTPError as e:
                 if e.code in (301, 302, 303, 307, 308):
-                    print(e.headers['Location'])
+                    video_url = e.headers['Location']
+                    if video_url.startswith('//'):
+                        video_url = 'https:' + video_url
+                    print(video_url)
                     return
             except Exception:
                 pass

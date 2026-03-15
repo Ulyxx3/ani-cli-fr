@@ -20,7 +20,7 @@ nth() {
     stdin=$(cat -)
     [ -z "$stdin" ] && return 1
     line_count="$(printf "%s\n" "$stdin" | wc -l | tr -d "[:space:]")"
-    [ "$line_count" -eq 1 ] && printf "%s" "$stdin" | cut -f2,3 && return 0
+    [ "$line_count" -eq 1 ] && printf "%s" "$stdin" | cut -f2- && return 0
     prompt="$1"
     multi_flag=""
     [ $# -ne 1 ] && shift && multi_flag="$1"
@@ -29,7 +29,7 @@ nth() {
     line_end=$(printf "%s" "$line" | tail -n1)
     [ -n "$line" ] || exit 1
     if [ "$line_start" = "$line_end" ]; then
-        printf "%s" "$stdin" | grep -E '^'"${line}"'($|[[:space:]])' | cut -f2,3 || exit 1
+        printf "%s" "$stdin" | grep -E '^'"${line}"'($|[[:space:]])' | cut -f2- || exit 1
     else
         printf "%s" "$stdin" | sed -n '/^'"${line_start}"'$/,/^'"${line_end}$"'/p' || exit 1
     fi
@@ -237,7 +237,8 @@ select_quality() {
 get_episode_url() {
     if [ "$source_type" = "anime-sama" ]; then
         # Use python scraper for anime-sama
-        episode_links=$(call_python_scraper "extract" "${server},${video_id}")
+        server_vid=$(printf "%s\n" "$ep_list" | grep "^${ep_no}[[:space:]]" | head -n1 | awk -F'\t' '{print $4}')
+        episode_links=$(call_python_scraper "extract" "$server_vid")
         if [ -z "$episode_links" ]; then
             die "Could not extract video link from Anime-Sama"
         fi
@@ -413,7 +414,11 @@ play() {
     if [ "$line_count" != 1 ] || [ -n "$start" ]; then
         [ -z "$start" ] && start=$(printf "%s\n" "$ep_no" | head -n1)
         [ -z "$end" ] && end=$(printf "%s\n" "$ep_no" | tail -n1)
-        range=$(printf "%s\n" "$ep_list" | sed -nE "/^${start}\$/,/^${end}\$/p")
+        if [ "$source_type" = "anime-sama" ]; then
+            range=$(printf "%s\n" "$ep_list" | awk -v s="$start" -v e="$end" '$1 >= s && $1 <= e {print $1}')
+        else
+            range=$(printf "%s\n" "$ep_list" | sed -nE "/^${start}\$/,/^${end}\$/p")
+        fi
         [ -z "$range" ] && die "Invalid range!"
         for i in $range; do
             tput clear
@@ -591,13 +596,11 @@ case "$search" in
         if [ "$source_type" = "anime-sama" ]; then
             ep_list=$(episodes_list "$id")
             # Select episode
-            ep_no=$(printf "%s\n" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
-            [ -z "$ep_no" ] && exit 1
-            # In anime-sama, $ep_no contains the 'server,video_id' part
-            server=$(printf "%s" "$ep_no" | cut -d',' -f1)
-            video_id=$(printf "%s" "$ep_no" | cut -d',' -f2)
-            # Fetch real episode name to display
-            ep_name_display=$(printf "%s\n" "$ep_list" | grep "^${ep_no}\b" | cut -f2)
+            # Input is 4 columns: Index \t Index \t Name \t Value
+            # nth returns Col 2,3,4: Index \t Name \t Value
+            result=$(printf "%s\n" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
+            ep_no=$(echo "$result" | cut -f1)
+            ep_name_display=$(echo "$result" | cut -f2)
         else
             ep_list=$(episodes_list "$id")
             [ -z "$ep_no" ] && ep_no=$(printf "%s" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
@@ -617,12 +620,32 @@ tput sc
 play
 [ "$player_function" = "download" ] || [ "$player_function" = "debug" ] && exit 0
 
-while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth "Playing episode $ep_no of $title... "); do
+while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth "Playing episode $ep_name_display of $title... "); do
     case "$cmd" in
-        next) ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null ;;
+        next) 
+            if [ "$source_type" = "anime-sama" ]; then
+                ep_no=$(printf "%s" "$ep_list" | grep -A1 "^${ep_no}[[:space:]]" | awk 'NR==2 {print $1}') 2>/dev/null
+            else
+                ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null
+            fi
+            ;;
         replay) episode="$replay" ;;
-        previous) ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{g;1!p;};h") 2>/dev/null ;;
-        select) ep_no=$(printf "%s" "$ep_list" | nth "Select episode: " "$multi_selection_flag") ;;
+        previous) 
+            if [ "$source_type" = "anime-sama" ]; then
+                ep_no=$(printf "%s" "$ep_list" | grep -B1 "^${ep_no}[[:space:]]" | awk 'NR==1 && $1 != "" {print $1}') 2>/dev/null
+                # Check if it was the first episode (prevent looping to itself if not found)
+                [ "$(printf "%s" "$ep_list" | head -n1 | awk '{print $1}')" = "$ep_no" ] && [ "$cmd" = "previous" ] && ep_no="" 
+            else
+                ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{g;1!p;};h") 2>/dev/null
+            fi
+            ;;
+        select) 
+            result=$(printf "%s" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
+            if [ "$source_type" = "anime-sama" ]; then
+                ep_no=$(echo "$result" | cut -f1)
+                ep_name_display=$(echo "$result" | cut -f2)
+            fi
+            ;;
         change_quality)
             new_quality="$(printf "%s" "$links" | launcher | cut -d\> -f1)"
             select_quality "$new_quality"
@@ -630,11 +653,6 @@ while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth 
         *) exit 0 ;;
     esac
     [ -z "$ep_no" ] && die "Out of range"
-    
-    if [ "$source_type" = "anime-sama" ]; then
-        server=$(printf "%s" "$ep_no" | cut -d',' -f1)
-        video_id=$(printf "%s" "$ep_no" | cut -d',' -f2)
-    fi
     play
 done
 
