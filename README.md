@@ -170,6 +170,18 @@ Reach out if you need help.*
 
 `ani-cli` is on scoop. Please read further for setup instructions.
 
+#### Using launch.bat (Source Code)
+
+If you have the source code cloned, you can simply run the provided `launch.bat` file.
+1. Make sure you have **Git for Windows** and **Python 3** installed.
+2. Double-click `launch.bat` or run it from CMD/PowerShell:
+   ```cmd
+   .\launch.bat
+   ```
+This script will automatically install missing dependencies (like `beautifulsoup4`) and launch the main script through Git Bash.
+
+#### Using Scoop (Recommended for general use)
+
 We will set up the bash.exe that comes with Git for Windows to be used with Windows Terminal. You may use terminals such as Wezterm or Alacritty, but this guide only covers Windows Terminal. The Git Bash terminal (i.e., mintty) [has problems with fzf](#windows-known-problems-and-solutions).
 
 First, you'll need to install the scoop package manager. [(Install)](https://scoop.sh/) Follow **quickstart**.
@@ -227,6 +239,7 @@ Consider also installing `yt-dlp` and `aria2` for downloading to work.
 Restart Windows Terminal. Go to the Git Bash profile and update `ani-cli` with `ani-cli -U`. You will use this keep ani-cli up-to-date.
 
 Now you can use ani-cli. Read the output of `ani-cli -h` for more help.
+
 
 #### Windows: Known Problems and Solutions
 
