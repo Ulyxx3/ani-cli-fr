@@ -243,8 +243,18 @@ get_episode_url() {
             die "Could not extract video link from Anime-Sama"
         fi
         
+        server_type=$(printf "%s" "$server_vid" | cut -d, -f1)
+        if [ "$server_type" = "sibnet" ]; then
+            m3u8_refr="https://video.sibnet.ru/"
+        elif [ "$server_type" = "vidmoly" ]; then
+            m3u8_refr="https://vidmoly.net/"
+        else
+            m3u8_refr=""
+        fi
+        
         # Format the links output for select_quality (needs to end with cc> or > )
-        links="best >$episode_links"
+        links="best cc>$episode_links
+m3u8_refr >$m3u8_refr"
         select_quality "$quality"
         return
     fi
@@ -387,7 +397,15 @@ play_episode() {
             fi
             ;;
         flatpak_mpv) flatpak run io.mpv.Mpv --force-media-title="${allanime_title}Episode ${ep_no}" "$episode" $subs_flag $refr_flag >/dev/null 2>&1 & ;;
-        vlc*) nohup $player_function --http-referrer="${allanime_refr}" --play-and-exit --meta-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 & ;;
+        vlc*)
+            if [ -n "$m3u8_refr" ]; then
+                nohup $player_function --http-referrer="${m3u8_refr}" --play-and-exit --meta-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 &
+            elif [ "$source_type" = "anime-sama" ]; then
+                nohup $player_function --play-and-exit --meta-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 &
+            else
+                nohup $player_function --http-referrer="${allanime_refr}" --play-and-exit --meta-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 &
+            fi
+            ;;
         *yncpla*) nohup $player_function "$episode" -- --force-media-title="${allanime_title}Episode ${ep_no}" $subs_flag $refr_flag >/dev/null 2>&1 & ;;
         download) "$player_function" "$episode" "${allanime_title}Episode ${ep_no}" "$subtitle" ;;
         catt) nohup catt cast "$episode" -s "$subtitle" >/dev/null 2>&1 & ;;
