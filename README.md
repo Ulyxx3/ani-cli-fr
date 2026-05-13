@@ -159,6 +159,11 @@ pkg install termux-am
 
 For players you can use the apk (playstore/fdroid) versions of mpv and vlc. Note that these cannot be checked from termux so a warning is generated when checking dependencies.
 
+**Note:** The `openssl` CLI utility is in the `openssl-tool` package on Termux, not `openssl`. Install it with:
+```sh
+pkg install openssl-tool
+```
+
 </details>
 
 ### Tier 2 Support: Windows, WSL, iOS, Steam Deck, FreeBSD
@@ -521,7 +526,8 @@ apk del grep sed curl fzf git aria2 ffmpeg ncurses
 - ffmpeg - m3u8 Downloader (fallback)
 - fzf - User interface
 - python3 - Anime-Sama Python Bridge (for `--anime-sama` and `--vf` options)
-- ani-skip (optional)
+- openssl (for decrypting encrypted video sources; on Termux, the CLI is in the `openssl-tool` package)
+- ani-skip (optional, for auto-skipping anime intros)
 - patch - Self updating
 
 ### Ani-Skip
