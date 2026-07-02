@@ -161,6 +161,7 @@ call_python_scraper() {
     else
         "$python_cmd" "$scraper_path" "$1" "$2"
     fi
+}
 cleanup() {
     [ "$player_function" = "android_mpv" ] && : >"/storage/emulated/0/mpv/mpv.config.mp4"
     printf "\033[0m"        # clears colors
@@ -353,10 +354,9 @@ m3u8_refr >$m3u8_refr"
     fi
 
     if printf "%s" "$api_resp" | grep -q '"tobeparsed"'; then
-        blob="$(printf "%s" "$api_resp" | sed -nE 's|.*"tobeparsed":"([^"]*)".*|\1|p')"
-        resp="$(decode_tobeparsed "$blob")"
+        resp="$(process_response "$api_resp" | tr '{}' '\n' | sed 's|\\u002F|\/|g;s|\\||g' | sed -nE 's|.*sourceUrl":"(--?[^\"]*)".*sourceName":"([^\"]*)".*|\2 :\1|p')"
     else
-        resp="$(printf "%s" "$api_resp" | tr '{}' '\n' | sed 's|\\u002F|\/|g;s|\\||g' | sed -nE 's|.*sourceUrl":"--([^"]*)".*sourceName":"([^"]*)".*|\2 :\1|p')"
+        resp="$(printf "%s" "$api_resp" | tr '{}' '\n' | sed 's|\\u002F|\/|g;s|\\||g' | sed -nE 's|.*sourceUrl":"(--?[^\"]*)".*sourceName":"([^\"]*)".*|\2 :\1|p')"
     fi
     printf "DEBUG resp:\n%s\n" "$resp" 1>&2
     # generate links into sequential files
