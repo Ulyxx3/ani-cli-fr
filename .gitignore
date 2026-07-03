@@ -1,0 +1,5 @@
+movix_opensource/
+__pycache__/
+*.pyc
+
+/movix/

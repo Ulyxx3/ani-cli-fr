@@ -88,6 +88,20 @@ help_info() {
         Display a countdown to the next episode
       -U, --update
         Update the script
+      --anime-sama
+        Use Anime-Sama as source (animes VF/VOSTFR)
+      --vf
+        Play French dubbed version (VF) - for Anime-Sama source
+      --movix
+        Use Movix.date as source (animes + films + series)
+      --movix-anime
+        Use Movix source - animes only
+      --movix-tv
+        Use Movix source - TV series only
+      --movix-movie
+        Use Movix source - movies only
+      --season <N>
+        Select season number (Movix TV, default: 1)
     Some example usages:
       %s -q 720p banana fish
       %s --skip --skip-title \"one piece\" -S 2 one piece
@@ -161,6 +175,35 @@ call_python_scraper() {
     else
         "$python_cmd" "$scraper_path" "$1" "$2"
     fi
+}
+
+call_movix_scraper() {
+    # Try multiple common python executable names
+    if command -v "python3" >/dev/null; then
+        python_cmd="python3"
+    elif command -v "python" >/dev/null; then
+        python_cmd="python"
+    else
+        die "Program \"python3\" or \"python\" not found. Il est requis pour la source Movix."
+    fi
+    
+    script_dir=$(dirname "$0")
+    scraper_path="${script_dir}/movix_scraper.py"
+    
+    if [ ! -f "$scraper_path" ]; then
+        die "movix_scraper.py not found in the same directory as ani-cli."
+    fi
+    
+    # $1 = action (search/episodes/extract)
+    # $2 = argument
+    # $3 = content type (anime/tv/movie/multi) - optional
+    # $4 = season number - optional
+    _movix_action="$1"
+    _movix_arg="$2"
+    _movix_type="${3:-multi}"
+    _movix_season="${4:-1}"
+    
+    "$python_cmd" "$scraper_path" "$_movix_action" "$_movix_arg" --type "$_movix_type" --season "$_movix_season" --mode "$mode"
 }
 cleanup() {
     [ "$player_function" = "android_mpv" ] && : >"/storage/emulated/0/mpv/mpv.config.mp4"
@@ -250,7 +293,11 @@ select_quality() {
             unset refr_flag
             ;;
         *)
-            refr_flag="--referrer=$allanime_refr"
+            if [ "$source_type" = "movix" ]; then
+                refr_flag="--referrer=$m3u8_refr"
+            else
+                refr_flag="--referrer=$allanime_refr"
+            fi
             ;;
     esac
 
@@ -336,6 +383,33 @@ get_episode_url() {
         links="best cc>$episode_links
 m3u8_refr >$m3u8_refr"
         select_quality "$quality"
+        [ -n "$m3u8_refr" ] && refr_flag="--referrer=$m3u8_refr"
+        return
+    fi
+
+    if [ "$source_type" = "movix" ]; then
+        # Use movix python scraper
+        server_vid=$(printf "%s\n" "$ep_list" | grep "^${ep_no}[[:space:]]" | head -n1 | awk -F'\t' '{print $4}')
+        episode_links=$(call_movix_scraper "extract" "$server_vid")
+        if [ -z "$episode_links" ]; then
+            die "Could not extract video link from Movix"
+        fi
+        
+        movix_server_type=$(printf "%s" "$server_vid" | cut -d, -f1)
+        if [ "$movix_server_type" = "sibnet" ]; then
+            m3u8_refr="https://video.sibnet.ru/"
+        elif [ "$movix_server_type" = "vidmoly" ]; then
+            m3u8_refr="https://vidmoly.net/"
+        else
+            # dynamic referer from movix_scraper.py's active domain resolution
+            movix_domain=$("$python_cmd" -c "import movix_scraper; print(movix_scraper.ACTIVE_DOMAIN)")
+            m3u8_refr="https://${movix_domain:-movix.date}/"
+        fi
+        
+        links="best cc>$episode_links
+m3u8_refr >$m3u8_refr"
+        select_quality "$quality"
+        [ -n "$m3u8_refr" ] && refr_flag="--referrer=$m3u8_refr"
         return
     fi
 
@@ -385,6 +459,12 @@ search_anime() {
         call_python_scraper "search" "$1"
         return
     fi
+
+    if [ "$source_type" = "movix" ]; then
+        # the movix scraper prints "type:id\tTitle"
+        call_movix_scraper "search" "$1" "$movix_content_type"
+        return
+    fi
     
     #shellcheck disable=SC2016
     search_gql='query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}'
@@ -412,6 +492,12 @@ episodes_list() {
     if [ "$source_type" = "anime-sama" ]; then
         # the python scraper prints "server,video_id\tTitle"
         call_python_scraper "episodes" "$1"
+        return
+    fi
+
+    if [ "$source_type" = "movix" ]; then
+        # the movix scraper prints index\tindex\tName\tserver_data
+        call_movix_scraper "episodes" "$1" "$movix_content_type" "${movix_season:-1}"
         return
     fi
     #shellcheck disable=SC2016
@@ -656,6 +742,15 @@ while [ $# -gt 0 ]; do
             ;;
         -N | --nextep-countdown) search=nextep ;;
         --anime-sama) search="anime-sama" && source_type="anime-sama" ;;
+        --movix) source_type="movix" && movix_content_type="multi" ;;
+        --movix-anime) source_type="movix" && movix_content_type="anime" ;;
+        --movix-tv) source_type="movix" && movix_content_type="tv" ;;
+        --movix-movie) source_type="movix" && movix_content_type="movie" ;;
+        --season)
+            [ $# -lt 2 ] && die "missing argument!"
+            movix_season="$2"
+            shift
+            ;;
         --vf) mode="vf" ;;
         -U | --update)
             branch="${2:-$branch}"
@@ -724,8 +819,16 @@ case "$search" in
         allanime_title="$(printf "%s" "$title" | cut -d'(' -f1 | tr -d '[:punct:]')"
         id=$(printf "%s" "$result" | cut -f1)
         
-        if [ "$source_type" = "anime-sama" ]; then
+        if [ "$source_type" = "anime-sama" ] || [ "$source_type" = "movix" ]; then
             ep_list=$(episodes_list "$id")
+            [ -z "$ep_list" ] && die "Aucun episode disponible pour ce contenu."
+            # For TV series with movix, allow season selection if not specified
+            if [ "$source_type" = "movix" ] && [ "$movix_content_type" = "tv" ] && [ -z "$movix_season" ]; then
+                # Get season list from TMDB via scraper
+                printf "\033[1;36mSaison (numero) : \033[0m" && read -r movix_season
+                [ -z "$movix_season" ] && movix_season=1
+                ep_list=$(episodes_list "$id")
+            fi
             # Select episode
             # Input is 4 columns: Index \t Index \t Name \t Value
             # nth returns Col 2,3,4: Index \t Name \t Value
@@ -754,7 +857,7 @@ play
 while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth "Playing episode $ep_name_display of $title... "); do
     case "$cmd" in
         next) 
-            if [ "$source_type" = "anime-sama" ]; then
+            if [ "$source_type" = "anime-sama" ] || [ "$source_type" = "movix" ]; then
                 ep_no=$(printf "%s" "$ep_list" | grep -A1 "^${ep_no}[[:space:]]" | awk 'NR==2 {print $1}') 2>/dev/null
             else
                 ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{n;p;}") 2>/dev/null
@@ -762,17 +865,16 @@ while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth 
             ;;
         replay) episode="$replay" ;;
         previous) 
-            if [ "$source_type" = "anime-sama" ]; then
+            if [ "$source_type" = "anime-sama" ] || [ "$source_type" = "movix" ]; then
                 ep_no=$(printf "%s" "$ep_list" | grep -B1 "^${ep_no}[[:space:]]" | awk 'NR==1 && $1 != "" {print $1}') 2>/dev/null
-                # Check if it was the first episode (prevent looping to itself if not found)
-                [ "$(printf "%s" "$ep_list" | head -n1 | awk '{print $1}')" = "$ep_no" ] && [ "$cmd" = "previous" ] && ep_no="" 
+                [ "$(printf "%s" "$ep_list" | head -n1 | awk '{print $1}')" = "$ep_no" ] && [ "$cmd" = "previous" ] && ep_no=""
             else
                 ep_no=$(printf "%s" "$ep_list" | sed -n "/^${ep_no}$/{g;1!p;};h") 2>/dev/null
             fi
             ;;
         select) 
             result=$(printf "%s" "$ep_list" | nth "Select episode: " "$multi_selection_flag")
-            if [ "$source_type" = "anime-sama" ]; then
+            if [ "$source_type" = "anime-sama" ] || [ "$source_type" = "movix" ]; then
                 ep_no=$(echo "$result" | cut -f1)
                 ep_name_display=$(echo "$result" | cut -f2)
             fi
