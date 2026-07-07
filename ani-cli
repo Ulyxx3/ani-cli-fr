@@ -163,13 +163,13 @@ call_python_scraper() {
     fi
     
     script_dir=$(dirname "$0")
-    scraper_path="${script_dir}/anime_sama_scraper.py"
+    scraper_path="${script_dir}/scrap/animesama"
     
-    if [ ! -f "$scraper_path" ]; then
-        die "anime_sama_scraper.py not found in the same directory as ani-cli."
+    if [ ! -d "$scraper_path" ]; then
+        die "scrap/animesama/ not found in the same directory as ani-cli."
     fi
     
-    # execute python script
+    # execute python package
     if [ "$mode" = "dub" ] || [ "$mode" = "vf" ]; then
         "$python_cmd" "$scraper_path" "$1" "$2" "--vf"
     else
@@ -188,10 +188,10 @@ call_movix_scraper() {
     fi
     
     script_dir=$(dirname "$0")
-    scraper_path="${script_dir}/movix_scraper.py"
+    scraper_path="${script_dir}/scrap/movix"
     
-    if [ ! -f "$scraper_path" ]; then
-        die "movix_scraper.py not found in the same directory as ani-cli."
+    if [ ! -d "$scraper_path" ]; then
+        die "scrap/movix/ not found in the same directory as ani-cli."
     fi
     
     # $1 = action (search/episodes/extract)
