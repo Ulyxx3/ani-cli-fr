@@ -8,10 +8,13 @@
 <a href="#iOS"><img src="https://img.shields.io/badge/os-ios-yellow">
 <a href="#Steam-deck"><img src="https://img.shields.io/badge/os-steamdeck-yellow">
 <br>
-<h1 align="center">
+<p align=center>
 <a href="https://discord.gg/aqu7GpqVmR"><img src="https://invidget.switchblade.xyz/aqu7GpqVmR"></a>
 <a href="matrix.md"><img src="/.assets/matrix-logo.svg" height=110></a>
 <br>
+<a href="https://discord.gg/aqu7GpqVmR">Discord</a>
+<a href="https://github.com/pystardust/ani-cli/blob/master/matrix.md">Matrix</a>
+</p>
 <a href="https://github.com/port19x"><img src="https://img.shields.io/badge/lead-port19x-lightblue"></a>
 <a href="https://github.com/CoolnsX"><img src="https://img.shields.io/badge/maintainer-CoolnsX-blue"></a>
 <a href="https://github.com/justchokingaround"><img src="https://img.shields.io/badge/maintainer-justchokingaround-blue"></a>
@@ -311,9 +314,9 @@ git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
 ~/.fzf/install
 
 mkdir ~/.aria2c
-curl -o ~/.aria2c/aria2-1.36.0.tar.bz2 https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2
-tar xvf ~/.aria2c/aria2-1.36.0.tar.bz2 -C ~/.aria2c/
-cp ~/.aria2c/aria2-1.36.0-linux-gnu-64bit-build1/aria2c ~/.local/bin/
+curl -o ~/.aria2c/aria2-1.37.0.tar.bz2 https://github.com/dmesg00/aria2-static-builds/releases/download/v1.37.0/aria2-1.37.0-linux-gnu-64bit-build1.tar.bz2
+tar xvf ~/.aria2c/aria2-1.37.0.tar.bz2 -C ~/.aria2c/
+cp ~/.aria2c/aria2-1.37.0-linux-gnu-64bit-build1/aria2c ~/.local/bin/
 chmod +x ~/.local/bin/aria2c
 
 curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
@@ -358,9 +361,9 @@ press enter("A" button on Steam Deck) on questions
 
 ```sh
 mkdir ~/.aria2c
-curl -o ~/.aria2c/aria2-1.36.0.tar.bz2 https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2
-tar xvf ~/.aria2c/aria2-1.36.0.tar.bz2 -C ~/.aria2c/
-cp ~/.aria2c/aria2-1.36.0-linux-gnu-64bit-build1/aria2c ~/.local/bin/
+curl -o ~/.aria2c/aria2-1.37.0.tar.bz2 https://github.com/dmesg00/aria2-static-builds/releases/download/v1.37.0/aria2-1.37.0-linux-gnu-64bit-build1.tar.bz2
+tar xvf ~/.aria2c/aria2-1.37.0.tar.bz2 -C ~/.aria2c/
+cp ~/.aria2c/aria2-1.37.0-linux-gnu-64bit-build1/aria2c ~/.local/bin/
 chmod +x ~/.local/bin/aria2c
 ```
 
