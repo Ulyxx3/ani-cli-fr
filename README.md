@@ -153,11 +153,6 @@ pkg install termux-am
 
 For players you can use the apk (playstore/fdroid) versions of mpv and vlc. Note that these cannot be checked from termux so a warning is generated when checking dependencies.
 
-**Note:** The `openssl` CLI utility is in the `openssl-tool` package on Termux, not `openssl`. Install it with:
-```sh
-pkg install openssl-tool
-```
-
 **Important Note:** To get all providers working with android MPV, Please follow below steps:
 - Run this command and allow storage permissions:
 ```sh
@@ -243,6 +238,30 @@ Next, install its dependencies.
 ```sh
 scoop bucket add extras
 scoop install fzf ffmpeg mpv
+```
+
+Botan is required to decrypt video sources. Download [`botan-cli.exe`](https://github.com/pystardust/ani-cli/releases/download/v4.15/botan-cli.exe) and its [`SHA-256 checksum`](https://github.com/pystardust/ani-cli/releases/download/v4.15/botan-cli.exe.sha256) from the [v4.15 release](https://github.com/pystardust/ani-cli/releases/tag/v4.15). From the download directory, verify the executable in Git Bash:
+
+```sh
+cd ~/Downloads
+sha256sum -c botan-cli.exe.sha256
+```
+
+Move botan-cli.exe into a directory that is already in your PATH (e.g., Scoop's shims folder, or Git's bin directory):
+
+```sh
+# If using Scoop:
+mv botan-cli.exe "$HOME/scoop/shims/"
+
+# If using Git for Windows:
+mv botan-cli.exe "C:/Program Files/Git/bin/"
+```
+
+Restart Windows Terminal, then verify the installation from the Git Bash profile:
+
+```sh
+which botan-cli
+botan-cli --version
 ```
 
 Consider also installing `yt-dlp` and `aria2` for downloading to work.
@@ -547,7 +566,7 @@ apk del grep sed curl fzf git aria2 ffmpeg ncurses
 - ffmpeg - m3u8 Downloader (fallback)
 - fzf - User interface
 - python3 - Anime-Sama Python Bridge (for `--anime-sama` and `--vf` options)
-- openssl (for decrypting encrypted video sources; on Termux, the CLI is in the `openssl-tool` package)
+- botan (for decrypting encrypted video sources)
 - ani-skip (optional, for auto-skipping anime intros)
 - patch - Self updating
 
