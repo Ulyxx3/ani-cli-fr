@@ -20,17 +20,20 @@ _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-from scrap.animesama import search, episodes, extract
+from scrap.animesama import search, episodes, extract, chapters, pages
 
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python scrap/animesama [search|episodes|extract] [arg] [--vf] [--source <src>]")
+        print(
+            "Usage: python scrap/animesama [search|episodes|chapters|pages|extract] [arg] [--vf] [--scans] [--source <src>]"
+        )
         sys.exit(1)
 
     action = sys.argv[1]
     arg = sys.argv[2]
     vf = "--vf" in sys.argv
+    scans = "--scans" in sys.argv
 
     target_source = None
     if "--source" in sys.argv:
@@ -42,9 +45,13 @@ def main():
             pass
 
     if action == "search":
-        search(arg, vf=vf)
+        search(arg, vf=vf, scans=scans)
     elif action == "episodes":
         episodes(arg, vf=vf, target_source=target_source)
+    elif action == "chapters":
+        chapters(arg, vf=vf)
+    elif action == "pages":
+        pages(arg)
     elif action == "extract":
         extract(arg)
     else:
@@ -54,3 +61,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

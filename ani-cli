@@ -56,7 +56,9 @@ help_info() {
         Delete history
       -l, --logview
         Show logs
-      -s, --syncplay
+      -s, --scans
+        Read manga scans via Anime-Sama
+      --syncplay
         Use Syncplay to watch with friends
       -S, --select-nth
         Select nth entry
@@ -88,13 +90,13 @@ help_info() {
         Display a countdown to the next episode
       -U, --update
         Update the script
-      --anime-sama
+      -a, --anime-sama
         Use Anime-Sama as source (animes VF/VOSTFR)
       --source <server>
         Specify preferred player/server for Anime-Sama (e.g. sibnet, vidmoly, sendvid, streamtape, vk)
       --vf
         Play French dubbed version (VF) - for Anime-Sama source
-      --movix
+      -m, --movix
         Use Movix.date as source (animes + films + series)
       --movix-anime
         Use Movix source - animes only
@@ -171,6 +173,7 @@ call_python_scraper() {
     # execute python package
     _extra_args=""
     [ "$mode" = "dub" ] || [ "$mode" = "vf" ] && _extra_args="$_extra_args --vf"
+    [ "$scans_mode" = "1" ] && _extra_args="$_extra_args --scans"
     [ -n "$source_server" ] && _extra_args="$_extra_args --source $source_server"
     
     # shellcheck disable=SC2086
@@ -209,6 +212,48 @@ cleanup() {
     [ "$player_function" = "android_mpv" ] && : >"/storage/emulated/0/mpv/mpv.config.mp4"
     printf "\033[0m"        # clears colors
     rm -f "${histfile}.new" # remove temp logfile
+}
+
+open_in_browser() {
+    target_path="$1"
+    
+    # 1. Path conversion for Windows / Git Bash / MINGW / MSYS / WSL
+    win_path="$target_path"
+    if command -v cygpath >/dev/null 2>&1; then
+        win_path=$(cygpath -w "$target_path" 2>/dev/null)
+    elif command -v wslpath >/dev/null 2>&1; then
+        win_path=$(wslpath -w "$target_path" 2>/dev/null)
+    else
+        win_path=$(printf "%s" "$target_path" | sed -E 's|^/([a-zA-Z])/|\1:/|; s|/|\\|g')
+    fi
+
+    # 2. Try PowerShell Start-Process (most reliable on Windows)
+    if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -Command "Start-Process '$win_path'" >/dev/null 2>&1 && return 0
+    fi
+
+    # 3. Try cmd.exe start
+    if command -v cmd.exe >/dev/null 2>&1; then
+        cmd.exe /c start "" "$win_path" >/dev/null 2>&1 && return 0
+    fi
+
+    # 4. Try explorer.exe
+    if command -v explorer.exe >/dev/null 2>&1; then
+        explorer.exe "$win_path" >/dev/null 2>&1 && return 0
+    fi
+
+    # 5. Try macOS open
+    if command -v open >/dev/null 2>&1 && [ "$(uname -s)" = "Darwin" ]; then
+        open "$target_path" >/dev/null 2>&1 && return 0
+    fi
+
+    # 6. Try Linux xdg-open / sensible-browser
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$target_path" >/dev/null 2>&1 && return 0
+    fi
+    if command -v sensible-browser >/dev/null 2>&1; then
+        sensible-browser "$target_path" >/dev/null 2>&1 && return 0
+    fi
 }
 
 # SCRAPING
@@ -494,8 +539,11 @@ time_until_next_ep() {
 # get the episodes list of the selected anime
 episodes_list() {
     if [ "$source_type" = "anime-sama" ]; then
-        # the python scraper prints "server,video_id\tTitle"
-        call_python_scraper "episodes" "$1"
+        if [ "$scans_mode" = "1" ]; then
+            call_python_scraper "chapters" "$1"
+        else
+            call_python_scraper "episodes" "$1"
+        fi
         return
     fi
 
@@ -562,6 +610,78 @@ android_mpv() {
 }
 
 play_episode() {
+    if [ "$scans_mode" = "1" ]; then
+        chapter_data=$(printf "%s\n" "$ep_list" | grep "^${ep_no}[[:space:]]" | head -n1 | awk -F'\t' '{print $4}')
+        if [ -z "$chapter_data" ]; then
+            die "Impossible d'extraire les données du chapitre."
+        fi
+
+        page_urls=$(call_python_scraper "pages" "$chapter_data")
+        if [ -z "$page_urls" ]; then
+            die "Aucune image trouvée pour ce chapitre."
+        fi
+
+        sanitized_title=$(printf "%s" "$title" | tr -cd '[:alnum:]_-' | tr ' ' '_')
+        ch_num=$(printf "%s" "$chapter_data" | cut -d, -f1)
+        scan_cache_dir="${hist_dir:-$HOME}/scans_${sanitized_title}/chap_${ch_num}"
+        mkdir -p "$scan_cache_dir"
+
+        if [ "$player_function" = "download" ]; then
+            out_dir="${download_dir}/${sanitized_title}/Chapitre_${ch_num}"
+            mkdir -p "$out_dir"
+            printf "\033[1;34mTéléchargement des pages du Chapitre %s dans %s...\033[0m\n" "$ch_num" "$out_dir"
+            page_idx=1
+            for img_url in $page_urls; do
+                padded_idx=$(printf "%03d" "$page_idx")
+                page_file="$out_dir/page_${padded_idx}.jpg"
+                if [ ! -s "$page_file" ]; then
+                    curl -sL -A "$agent" "$img_url" -o "${page_file}.tmp" && mv "${page_file}.tmp" "$page_file" &
+                    if [ $((page_idx % 8)) -eq 0 ]; then
+                        wait
+                    fi
+                fi
+                page_idx=$((page_idx + 1))
+            done
+            wait
+            printf "\033[1;32mChapitre %s téléchargé avec succès (%s pages).\033[0m\n" "$ch_num" "$((page_idx - 1))"
+            return
+        fi
+
+        html_file="$scan_cache_dir/chapter.html"
+        cat <<EOF > "$html_file"
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - Chapitre ${ch_num}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background-color: #0d0d11; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding-bottom: 50px; }
+    header { position: sticky; top: 0; width: 100%; background: rgba(13, 13, 17, 0.95); backdrop-filter: blur(10px); padding: 14px 20px; text-align: center; font-size: 1.1rem; font-weight: 700; border-bottom: 1px solid #1e293b; z-index: 100; color: #38bdf8; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+    .container { display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 850px; margin-top: 12px; gap: 0; }
+    .container img { width: 100%; height: auto; display: block; margin: 0 auto; border-radius: 0; background: #16161e; min-height: 250px; }
+  </style>
+</head>
+<body>
+  <header>${title} — Chapitre ${ch_num}</header>
+  <div class="container">
+EOF
+        page_idx=1
+        for img_url in $page_urls; do
+            printf '    <img src="%s" loading="lazy" alt="Page %s">\n' "$img_url" "$page_idx" >> "$html_file"
+            page_idx=$((page_idx + 1))
+        done
+        cat <<EOF >> "$html_file"
+  </div>
+</body>
+</html>
+EOF
+
+        printf "\033[1;32mOuverture du Chapitre %s (%s pages) dans le lecteur Webtoon...\033[0m\n" "$ch_num" "$((page_idx - 1))"
+        open_in_browser "$html_file"
+        return
+    fi
     [ "$log_episode" = 1 ] && [ "$player_function" != "debug" ] && [ "$player_function" != "download" ] && command -v logger >/dev/null && logger -t ani-cli "${allanime_title}${ep_no}"
     [ "$skip_intro" = 1 ] && skip_flag="$(ani-skip -q "$mal_id" -e "$ep_no")"
     [ -z "$episode" ] && get_episode_url
@@ -689,7 +809,12 @@ while [ $# -gt 0 ]; do
                 *) player_function="vlc" ;;
             esac
             ;;
-        -s | --syncplay)
+        -s | --scans)
+            scans_mode=1
+            search="anime-sama"
+            source_type="anime-sama"
+            ;;
+        --syncplay)
             case "$(uname -s)" in
                 Darwin*) player_function="/Applications/Syncplay.app/Contents/MacOS/syncplay" ;;
                 MINGW* | *Msys)
@@ -745,13 +870,13 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -N | --nextep-countdown) search=nextep ;;
-        --anime-sama) search="anime-sama" && source_type="anime-sama" ;;
+        -a | --anime-sama) search="anime-sama" && source_type="anime-sama" ;;
         --source)
             [ $# -lt 2 ] && die "missing argument!"
             source_server="$2"
             shift
             ;;
-        --movix) source_type="movix" && movix_content_type="multi" ;;
+        -m | --movix) source_type="movix" && movix_content_type="multi" ;;
         --movix-anime) source_type="movix" && movix_content_type="anime" ;;
         --movix-tv) source_type="movix" && movix_content_type="tv" ;;
         --movix-movie) source_type="movix" && movix_content_type="movie" ;;

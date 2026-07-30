@@ -16,17 +16,20 @@ from .extractors import extract_video_url
 #  RECHERCHE
 # ---------------------------------------------------------------------------
 
-def search(query, vf=False):
+def search(query, vf=False, scans=False):
     """
-    Recherche un anime sur anime-sama.
+    Recherche un anime ou scan sur anime-sama.
     Affiche au format : URL\tTitre  (compatible ani-cli).
     vf=True pour filtrer uniquement les résultats VF.
+    scans=True pour filtrer uniquement les résultats Scans.
     """
     domain = get_active_domain()
     url = f"https://{domain}/catalogue/"
     params = {"search": query}
     if vf:
         params["langue[]"] = "VF"
+    if scans:
+        params["type[]"] = "Scans"
 
     html = make_request(url, params)
     soup = BeautifulSoup(html, "html.parser")
@@ -46,6 +49,7 @@ def search(query, vf=False):
         if query_unquoted and query_unquoted.lower() not in title.lower():
             continue
         print(f"{url_path}\t{title}")
+
 
 
 # ---------------------------------------------------------------------------
@@ -257,3 +261,115 @@ def extract(server_data):
     server_type, video_id_or_url = server_data.split(",", 1)
     video_url = extract_video_url(server_type, video_id_or_url)
     print(video_url)
+
+
+# ---------------------------------------------------------------------------
+#  SCANS & CHAPITRES
+# ---------------------------------------------------------------------------
+
+def chapters(url_path, vf=False):
+    """
+    Liste les chapitres de scans d'une oeuvre depuis Anime-Sama.
+    Affiche au format : idx\tidx\t[Section] Chapitre N (X pages)\tch_num,page_count,quoted_titre_oeuvre
+    """
+    domain = get_active_domain()
+    complete_url = (
+        f"https://{domain}{url_path}" if url_path.startswith("/") else url_path
+    )
+
+    html = make_request(complete_url)
+    if not html:
+        return
+
+    scans_panels = []
+    for match in re.finditer(
+        r'panneauScan\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*\)', html
+    ):
+        scan_name = match.group(1)
+        subpath = match.group(2)
+        if subpath == "url" or scan_name == "nom":
+            continue
+        if vf and "vostfr" in subpath:
+            subpath = subpath.replace("vostfr", "vf")
+        scans_panels.append((scan_name, subpath))
+
+    if not scans_panels:
+        fallback_subpath = "scan/vf" if vf else "scan/vostfr"
+        scans_panels.append(("Scans", fallback_subpath))
+
+    import json
+
+    global_i = 1
+    for scan_name, subpath in scans_panels:
+        scan_sub_url = complete_url
+        if not scan_sub_url.endswith("/"):
+            scan_sub_url += "/"
+        scan_sub_url += subpath.strip("/") + "/"
+
+        sub_html = make_request(scan_sub_url)
+        if not sub_html:
+            continue
+
+        soup = BeautifulSoup(sub_html, "html.parser")
+        titre_el = soup.find(id="titreOeuvre")
+        titre_oeuvre = titre_el.text.strip() if titre_el else ""
+
+        if not titre_oeuvre:
+            slug = url_path.strip("/").split("/")[-1]
+            titre_oeuvre = slug.replace("-", " ").title()
+
+        api_url = f"https://{domain}/s2/scans/get_nb_chap_et_img.php?oeuvre={urllib.parse.quote(titre_oeuvre)}"
+        api_res = make_request(api_url)
+        if not api_res or "error" in api_res:
+            slug = url_path.strip("/").split("/")[-1]
+            slug_title = slug.replace("-", " ").title()
+            if slug_title != titre_oeuvre:
+                api_url = f"https://{domain}/s2/scans/get_nb_chap_et_img.php?oeuvre={urllib.parse.quote(slug_title)}"
+                api_res = make_request(api_url)
+
+        if not api_res or "error" in api_res:
+            continue
+
+        try:
+            chap_data = json.loads(api_res)
+        except Exception:
+            continue
+
+        def chap_key(k):
+            try:
+                return float(k)
+            except ValueError:
+                return k
+
+        sorted_chaps = sorted(chap_data.keys(), key=chap_key)
+        for ch in sorted_chaps:
+            pages_count = chap_data[ch]
+            prefix = f"[{scan_name}] " if scan_name else ""
+            quoted_titre = urllib.parse.quote(titre_oeuvre)
+            print(
+                f"{global_i}\t{global_i}\t{prefix}Chapitre {ch} ({pages_count} pages)\t{ch},{pages_count},{quoted_titre}"
+            )
+            global_i += 1
+
+
+def pages(chapter_data):
+    """
+    Extrait les URLs directes des images de chaque page pour un chapitre donné.
+    chapter_data format: 'ch_num,page_count,quoted_titre_oeuvre'
+    """
+    domain = get_active_domain()
+    parts = chapter_data.split(",")
+    if len(parts) < 3:
+        print(f"[anime-sama] Format chapter_data invalide : {chapter_data}", file=sys.stderr)
+        return
+
+    ch_num = parts[0]
+    try:
+        page_count = int(parts[1])
+    except ValueError:
+        page_count = 0
+    quoted_titre = parts[2]
+
+    for page in range(1, page_count + 1):
+        print(f"https://{domain}/s2/scans/{quoted_titre}/{ch_num}/{page}.jpg")
+
