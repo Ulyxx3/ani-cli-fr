@@ -11,3 +11,7 @@
   - [ ] scans mangadex : ani-cli -s query | scans anime-sama : ani-cli -a -s query
 
 - [ ] **3. Clarifier et bien séparer les catégories films/anime/scans**
+  - [ ] code pour les scans anime-sama séparé
+
+- [ ] **4. Améliorer le launch.bat**
+  - [ ] ajouter un menu au début du launch.bat avec une option pour lancer l'app de base (anime en anglais), pour lancer en mode scan mangadex, avec scan-anime-sama ou movix
