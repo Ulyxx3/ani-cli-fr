@@ -90,6 +90,8 @@ help_info() {
         Update the script
       --anime-sama
         Use Anime-Sama as source (animes VF/VOSTFR)
+      --source <server>
+        Specify preferred player/server for Anime-Sama (e.g. sibnet, vidmoly, sendvid, streamtape, vk)
       --vf
         Play French dubbed version (VF) - for Anime-Sama source
       --movix
@@ -167,11 +169,12 @@ call_python_scraper() {
     fi
     
     # execute python package
-    if [ "$mode" = "dub" ] || [ "$mode" = "vf" ]; then
-        "$python_cmd" "$scraper_path" "$1" "$2" "--vf"
-    else
-        "$python_cmd" "$scraper_path" "$1" "$2"
-    fi
+    _extra_args=""
+    [ "$mode" = "dub" ] || [ "$mode" = "vf" ] && _extra_args="$_extra_args --vf"
+    [ -n "$source_server" ] && _extra_args="$_extra_args --source $source_server"
+    
+    # shellcheck disable=SC2086
+    "$python_cmd" "$scraper_path" "$1" "$2" $_extra_args
 }
 
 call_movix_scraper() {
@@ -743,6 +746,11 @@ while [ $# -gt 0 ]; do
             ;;
         -N | --nextep-countdown) search=nextep ;;
         --anime-sama) search="anime-sama" && source_type="anime-sama" ;;
+        --source)
+            [ $# -lt 2 ] && die "missing argument!"
+            source_server="$2"
+            shift
+            ;;
         --movix) source_type="movix" && movix_content_type="multi" ;;
         --movix-anime) source_type="movix" && movix_content_type="anime" ;;
         --movix-tv) source_type="movix" && movix_content_type="tv" ;;
@@ -892,8 +900,18 @@ while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth 
             fi
             ;;
         change_quality)
-            new_quality="$(printf "%s" "$links" | launcher | cut -d\> -f1)"
-            select_quality "$new_quality"
+            if [ "$source_type" = "anime-sama" ]; then
+                selected_src="$(printf "sibnet\nvidmoly\nsendvid\nstreamtape\nvk" | launcher "" "Select server: ")"
+                if [ -n "$selected_src" ]; then
+                    source_server="$selected_src"
+                    ep_list=$(episodes_list "$id")
+                    unset episode
+                    get_episode_url
+                fi
+            else
+                new_quality="$(printf "%s" "$links" | launcher | cut -d\> -f1)"
+                select_quality "$new_quality"
+            fi
             ;;
         *)
             cleanup

@@ -1,7 +1,7 @@
 """
-scraper.py - Fonctions de scraping pour anime-sama : search, episodes, extract.
+scraper.py - Fonctions de scraping pour anime-sama : search, episodes, extract, servers.
 
-Langue par défaut : VOSTFR.  Passer vf=True (ou --vf en CLI) pour la VF.
+Langue par défaut : VOSTFR. Passer vf=True (ou --vf en CLI) pour la VF.
 """
 import re
 import sys
@@ -9,6 +9,7 @@ import urllib.parse
 from bs4 import BeautifulSoup
 
 from .client import make_request, get_active_domain
+from .extractors import extract_video_url
 
 
 # ---------------------------------------------------------------------------
@@ -18,7 +19,7 @@ from .client import make_request, get_active_domain
 def search(query, vf=False):
     """
     Recherche un anime sur anime-sama.
-    Affiche au format : URL\\tTitre  (compatible ani-cli).
+    Affiche au format : URL\tTitre  (compatible ani-cli).
     vf=True pour filtrer uniquement les résultats VF.
     """
     domain = get_active_domain()
@@ -48,8 +49,28 @@ def search(query, vf=False):
 
 
 # ---------------------------------------------------------------------------
-#  LISTE DES ÉPISODES
+#  UTILITAIRES DE SERVEUR
 # ---------------------------------------------------------------------------
+
+def _identify_server(url):
+    """Identifie le type de serveur depuis une URL embed/script."""
+    url_lower = url.lower()
+    if "sibnet.ru" in url_lower:
+        return "sibnet"
+    elif "vidmoly" in url_lower or "ansembed" in url_lower:
+        return "vidmoly"
+    elif "sendvid.com" in url_lower:
+        return "sendvid"
+    elif "streamtape" in url_lower:
+        return "streamtape"
+    elif "vk.com" in url_lower:
+        return "vk"
+    elif "myvi." in url_lower:
+        return "myvi"
+    elif "ok.ru" in url_lower:
+        return "okru"
+    return "other"
+
 
 def _extract_episodes_from_js(content):
     """
@@ -98,13 +119,30 @@ def _extract_episodes_from_js(content):
     return episode_list
 
 
-def episodes(url_path, vf=False):
+def _parse_season_js(content):
+    """
+    Extrait tous les tableaux eps1, eps2, eps3... depuis le JS de la saison.
+    Retourne un dict: {server_index: [(url, server_type), ...]}
+    """
+    servers_dict = {}
+    arrays = re.findall(r'var eps(\d+)\s*=\s*\[(.*?)\];', content, re.DOTALL)
+    for array_idx, array_content in arrays:
+        urls = re.findall(r'https?://[^\s\'",]+', array_content)
+        if urls:
+            server_type = _identify_server(urls[0])
+            servers_dict[int(array_idx)] = [(u, server_type) for u in urls]
+    return servers_dict
+
+
+# ---------------------------------------------------------------------------
+#  LISTE DES ÉPISODES ET SERVEURS
+# ---------------------------------------------------------------------------
+
+def episodes(url_path, vf=False, target_source=None):
     """
     Liste les épisodes d'un anime depuis une URL de catalogue anime-sama.
-    Affiche au format : idx\\tidx\\t[Saison] NomEp\\tserver_type,video_id
-
-    Langue par défaut : VOSTFR.  vf=True pour forcer la VF.
-    Priorité de serveur : sibnet > vidmoly.
+    Affiche au format : idx\tidx\t[Saison] NomEp\tserver_type,video_url_or_id
+    target_source permet de forcer un serveur spécifique (ex: 'vidmoly', 'sibnet', etc.).
     """
     domain = get_active_domain()
     complete_url = (
@@ -157,49 +195,50 @@ def episodes(url_path, vf=False):
         if not content:
             continue
 
-        arrays = re.findall(r'var eps(\d+) = \[(.*?)\];', content, re.DOTALL)
-        best_server = None
-        best_episodes = []
+        servers_dict = _parse_season_js(content)
+        if not servers_dict:
+            continue
 
-        if arrays:
-            for _array_num, array_content in arrays:
-                sibnet_matches = list(
-                    re.finditer(
-                        r'https://video\.sibnet\.ru/shell\.php\?videoid=(\d+)',
-                        array_content,
-                    )
-                )
-                if sibnet_matches and not best_server:
-                    best_server = "sibnet"
-                    best_episodes = [(m.group(1), "sibnet") for m in sibnet_matches]
+        selected_server_idx = None
+        if target_source:
+            for s_idx, ep_list in servers_dict.items():
+                if ep_list and target_source.lower() in ep_list[0][1].lower():
+                    selected_server_idx = s_idx
                     break
 
-                vidmoly_matches = list(
-                    re.finditer(
-                        r'https://vidmoly\.[a-z]+/embed-([^.]+)\.html', array_content
-                    )
-                )
-                if vidmoly_matches and not best_server:
-                    best_server = "vidmoly"
-                    best_episodes = [(m.group(1), "vidmoly") for m in vidmoly_matches]
+        if selected_server_idx is None:
+            # Ordre de priorité par défaut : sibnet > vidmoly > sendvid > streamtape > vk > premier dispo
+            priority = ["sibnet", "vidmoly", "sendvid", "streamtape", "vk"]
+            for p in priority:
+                for s_idx, ep_list in sorted(servers_dict.items()):
+                    if ep_list and ep_list[0][1] == p:
+                        selected_server_idx = s_idx
+                        break
+                if selected_server_idx is not None:
+                    break
 
-        if not best_episodes:
-            sibnet_matches = list(
-                re.finditer(
-                    r'https://video\.sibnet\.ru/shell\.php\?videoid=(\d+)', content
-                )
-            )
-            if sibnet_matches:
-                best_server = "sibnet"
-                best_episodes = [(m.group(1), "sibnet") for m in sibnet_matches]
+        if selected_server_idx is None:
+            selected_server_idx = min(servers_dict.keys())
 
+        best_episodes = servers_dict[selected_server_idx]
         episode_names = _extract_episodes_from_js(content)
 
-        for i, (video_id, server_type) in enumerate(best_episodes):
+        for i, (video_url, server_type) in enumerate(best_episodes):
             ep_name = episode_names[i] if i < len(episode_names) else f"Episode {i+1}"
             prefix = f"[{season_name}] " if season_name else ""
-            print(f"{global_i}\t{global_i}\t{prefix}{ep_name}\t{server_type},{video_id}")
+            print(f"{global_i}\t{global_i}\t{prefix}{ep_name}\t{server_type},{video_url}")
             global_i += 1
+
+
+def servers(server_data):
+    """
+    Extrait tous les serveurs disponibles pour un épisode spécifique.
+    Format server_data : 'server_type,video_url'
+    Affiche la liste de tous les serveurs disponibles pour cet épisode.
+    Format de sortie : server_name\tserver_type,video_url
+    """
+    # Si server_data contient juste server_type et url/id
+    print(f"Default ({server_data.split(',', 1)[0]})\t{server_data}")
 
 
 # ---------------------------------------------------------------------------
@@ -209,79 +248,12 @@ def episodes(url_path, vf=False):
 def extract(server_data):
     """
     Extrait l'URL vidéo directe depuis les données du serveur.
-    Format server_data : 'server_type,video_id'
-    Supporte : sibnet, vidmoly.
+    Format server_data : 'server_type,video_url_or_id'
     """
     if "," not in server_data:
         print(f"[anime-sama] Format server_data invalide : {server_data}", file=sys.stderr)
         return
 
-    server_type, video_id = server_data.split(",", 1)
-
-    if server_type == "sibnet":
-        _extract_sibnet(video_id)
-    elif server_type == "vidmoly":
-        _extract_vidmoly(video_id)
-    else:
-        # Fallback : affiche l'ID tel quel
-        print(video_id)
-
-
-def _extract_sibnet(video_id):
-    """Extrait l'URL directe MP4 depuis sibnet (suit la redirection 302)."""
-    url = f"https://video.sibnet.ru/shell.php?videoid={video_id}"
-    html = make_request(url)
-    match = re.search(r'player\.src\(\[\{src: "/v/([^/]+)/', html)
-    if match:
-        video_hash = match.group(1)
-        mp4_url = f"https://video.sibnet.ru/v/{video_hash}/{video_id}.mp4"
-
-        import urllib.request
-        import urllib.error
-
-        req = urllib.request.Request(
-            mp4_url,
-            headers={
-                "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0",
-                "referer": "https://video.sibnet.ru/",
-            },
-        )
-
-        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                return None
-
-        opener = urllib.request.build_opener(NoRedirectHandler())
-        try:
-            opener.open(req, timeout=10)
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308):
-                video_url = e.headers["Location"]
-                if video_url.startswith("//"):
-                    video_url = "https:" + video_url
-                print(video_url)
-                return
-        except Exception:
-            pass
-
-
-def _extract_vidmoly(video_id):
-    """Extrait le lien M3U8 depuis vidmoly (essaie .net puis .to)."""
-    hls_patterns = [
-        r'sources:\s*\[\s*\{\s*file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
-        r'file:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
-        r'"file"\s*:\s*"([^"]+\.m3u8[^"]*)"',
-        r'src:\s*["\']([^"\']+\.m3u8[^"\']*)["\']',
-    ]
-    for domain in ["vidmoly.net", "vidmoly.to"]:
-        embed_url = f"https://{domain}/embed-{video_id}.html"
-        html = make_request(embed_url)
-        for pattern in hls_patterns:
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                video_url = match.group(1)
-                if video_url.startswith("//"):
-                    video_url = "https:" + video_url
-                print(video_url)
-                return
-    print(f"https://vidmoly.net/embed-{video_id}.html")
+    server_type, video_id_or_url = server_data.split(",", 1)
+    video_url = extract_video_url(server_type, video_id_or_url)
+    print(video_url)
