@@ -352,10 +352,17 @@ fetch_keys() {
     allanime_epoch="$(sed -nE 's|.*"epoch":([0-9]+).*|\1|p' "$page")"
     aa_part_b="$(sed -nE 's|.*"partB":"([^"]*)".*|\1|p' "$page")"
     app_url="$(grep -oE "${allanime_cdn}/entry/app\.[A-Za-z0-9_.-]+\.js" "$page")"
-
+    
+    # Try different regex patterns for chunks
     _chunks="$(curl -s -A "$agent" "$app_url" | grep -oE '"[.][.]/chunks/[A-Za-z0-9_.-]+\.js"' | tr -d '"' | head -5)"
+    [ -z "$_chunks" ] && _chunks="$(curl -s -A "$agent" "$app_url" | grep -oE '"/all/mk/_app/immutable/chunks/[A-Za-z0-9_.-]+\.js"' | tr -d '"' | head -5)"
+    
     for _chunk in $_chunks; do
-        urls="$urls ${allanime_cdn}/${_chunk#../}"
+        if printf '%s' "$_chunk" | grep -q '^http'; then
+             urls="$urls $_chunk"
+        else
+             urls="$urls ${allanime_cdn}/${_chunk#../}"
+        fi
     done
 
     js="$(mktemp)"
@@ -367,9 +374,11 @@ fetch_keys() {
 
     i=1
     while [ "$i" -le 64 ]; do
-        m_byte="0x$(printf '%s' "$aa_mask_hex" | cut -c "$i"-$((i + 1)))"
-        p_byte="0x$(printf '%s' "$part_b_hex" | cut -c "$i"-$((i + 1)))"
-        res_dec=$((m_byte ^ p_byte))
+        m_hex="$(printf '%s' "$aa_mask_hex" | cut -c "$i"-$((i + 1)))"
+        p_hex="$(printf '%s' "$part_b_hex" | cut -c "$i"-$((i + 1)))"
+        [ -z "$m_hex" ] && m_hex="0"
+        [ -z "$p_hex" ] && p_hex="0"
+        res_dec=$((0x$m_hex ^ 0x$p_hex))
         allanime_key="${allanime_key}$(printf '%02x' "$res_dec")"
         i=$((i + 2))
     done
