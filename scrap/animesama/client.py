@@ -16,7 +16,10 @@ def make_request(url, params=None):
     """Effectue une requête HTTP GET et retourne le texte brut."""
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers=HEADERS_BASE)
+    headers = dict(HEADERS_BASE)
+    parsed = urllib.parse.urlparse(url)
+    headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             return response.read().decode("utf-8", errors="ignore")

@@ -36,7 +36,7 @@ def search(query, vf=False, scans=False):
 
     results = []
     for card in soup.find_all("a", href=True):
-        titre_tag = card.find(["h1", "h2"])
+        titre_tag = card.find(["h1", "h2", "h3"]) or card.find(class_=re.compile(r"titre", re.I))
         if titre_tag and "catalogue" in card["href"]:
             titre = titre_tag.text.strip()
             href = card["href"]
