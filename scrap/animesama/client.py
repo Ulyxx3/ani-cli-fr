@@ -1,8 +1,9 @@
 """
 client.py - Requêtes HTTP et résolution de domaine pour anime-sama.
 """
-import urllib.request
+import urllib.error
 import urllib.parse
+import urllib.request
 import sys
 
 HEADERS_BASE = {
@@ -11,28 +12,51 @@ HEADERS_BASE = {
     "connection": "keep-alive",
 }
 
+_CACHED_DOMAIN = None
 
-def make_request(url, params=None):
-    """Effectue une requête HTTP GET et retourne le texte brut."""
+
+def make_request_with_url(url, params=None, referer=None, silent_404=False):
+    """
+    Effectue une requête HTTP GET et retourne (final_url, texte_brut).
+    Retourne ("", "") en cas d'erreur.
+    """
     if params:
         url += "?" + urllib.parse.urlencode(params)
     headers = dict(HEADERS_BASE)
     parsed = urllib.parse.urlparse(url)
-    headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
+    headers["Referer"] = referer if referer is not None else f"{parsed.scheme}://{parsed.netloc}/"
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
-            return response.read().decode("utf-8", errors="ignore")
+            final_url = response.geturl() or url
+            body = response.read().decode("utf-8", errors="ignore")
+            return final_url, body
+    except urllib.error.HTTPError as e:
+        if not (silent_404 and e.code == 404):
+            print(f"Error fetching {url}: {e}", file=sys.stderr)
+        return "", ""
     except Exception as e:
         print(f"Error fetching {url}: {e}", file=sys.stderr)
-        return ""
+        return "", ""
+
+
+def make_request(url, params=None, referer=None, silent_404=False):
+    """Effectue une requête HTTP GET et retourne le texte brut."""
+    _, body = make_request_with_url(
+        url, params=params, referer=referer, silent_404=silent_404
+    )
+    return body
 
 
 def get_active_domain():
     """
     Résout dynamiquement le domaine actif parmi les domaines anime-sama connus.
-    Retourne le premier domaine qui répond avec '/catalogue/' dans son URL.
+    Met en cache le domaine trouvé pour la durée du processus.
     """
+    global _CACHED_DOMAIN
+    if _CACHED_DOMAIN:
+        return _CACHED_DOMAIN
+
     domains = [
         "anime-sama.to",
         "anime-sama.tv",
@@ -49,7 +73,10 @@ def get_active_domain():
             with urllib.request.urlopen(req, timeout=5) as response:
                 url = response.geturl()
                 if "catalogue" in url:
-                    return urllib.parse.urlparse(url).netloc
+                    _CACHED_DOMAIN = urllib.parse.urlparse(url).netloc
+                    return _CACHED_DOMAIN
         except Exception:
             pass
-    return "anime-sama.to"
+
+    _CACHED_DOMAIN = "anime-sama.to"
+    return _CACHED_DOMAIN

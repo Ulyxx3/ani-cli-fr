@@ -3,17 +3,19 @@ extractors package - Registre central des extracteurs vidéo.
 """
 from typing import Dict, Type
 from .base import BaseExtractor
-from .sibnet import SibnetExtractor
 from .vidmoly import VidmolyExtractor
+from .uqload import UqloadExtractor
+from .earnvids import EarnvidsExtractor
+from .voe import VoeExtractor
 from .sendvid import SendvidExtractor
-from .streamtape import StreamtapeExtractor
 from .vk import VkExtractor
 
 EXTRACTORS: Dict[str, Type[BaseExtractor]] = {
-    "sibnet": SibnetExtractor,
     "vidmoly": VidmolyExtractor,
+    "uqload": UqloadExtractor,
+    "earnvids": EarnvidsExtractor,
+    "voe": VoeExtractor,
     "sendvid": SendvidExtractor,
-    "streamtape": StreamtapeExtractor,
     "vk": VkExtractor,
 }
 
@@ -29,10 +31,8 @@ def get_extractor(server_name: str) -> BaseExtractor:
 def extract_video_url(server_type: str, video_id_or_url: str) -> str:
     extractor = get_extractor(server_type)
     if extractor:
-        url = extractor.extract(video_id_or_url)
-        if url:
-            return url
-    # Fallback si l'URL est déjà directe ou non gérée
+        return extractor.extract(video_id_or_url)
+    # Fallback uniquement si aucun extracteur dédié n'existe (ex: youtube, dailymotion)
     if video_id_or_url.startswith("http"):
         return video_id_or_url
     return video_id_or_url

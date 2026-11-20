@@ -8,8 +8,10 @@ Peut être lancé de deux façons :
   python -m scrap.animesama <action> <arg> [--vf] [--source <source_name>]
 
 Actions :
-  search   <query> [--vf]                       Recherche un anime (VOSTFR par défaut, --vf pour VF)
+  search   <query> [--vf] [--scans]             Recherche un anime ou scan (VOSTFR par défaut, --vf pour VF)
   episodes <url_path> [--vf] [--source <src>]   Liste les épisodes d'un anime (avec source choisie si spécifiée)
+  chapters <url_path> [--vf] [--scans]          Liste les chapitres de scans d'une oeuvre
+  pages    <chapter_data>                       Liste les URLs d'images d'un chapitre
   extract  <server_data>                        Extrait l'URL vidéo directe
 """
 import sys

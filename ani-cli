@@ -94,7 +94,7 @@ help_info() {
       -a, --anime-sama
         Use Anime-Sama as source (animes VF/VOSTFR)
       --source <server>
-        Specify preferred player/server for Anime-Sama (e.g. sibnet, vidmoly, sendvid, streamtape, vk)
+        Specify preferred player/server for Anime-Sama (e.g. vidmoly, uqload, earnvids, voe, sendvid, vk)
       --vf
         Play French dubbed version (VF) - for Anime-Sama source
       -m, --movix
@@ -423,19 +423,17 @@ get_video_link() {
         fi
         
         server_type=$(printf "%s" "$server_vid" | cut -d, -f1)
-        if [ "$server_type" = "sibnet" ]; then
-            m3u8_refr="https://video.sibnet.ru/"
-        elif [ "$server_type" = "vidmoly" ]; then
-            m3u8_refr="https://vidmoly.net/"
-        else
-            m3u8_refr=""
-        fi
-        
+        case "$server_type" in
+            vidmoly) m3u8_refr="https://ansembed.net/" ;;
+            uqload) m3u8_refr="https://uqload.vc/" ;;
+            sendvid) m3u8_refr="https://sendvid.com/" ;;
+            *) m3u8_refr="" ;;
+        esac
+
         refr="$m3u8_refr"
         links="best >$episode_links
 m3u8_refr >$m3u8_refr"
         select_quality "$quality"
-        [ -n "$m3u8_refr" ] && player_extra_flags="$player_extra_flags --referrer=$m3u8_refr"
         return
     fi
 
@@ -1044,7 +1042,9 @@ while cmd=$(printf "next\nreplay\nprevious\nselect\nchange_quality\nquit" | nth 
             ;;
         change_quality)
             if [ "$source_type" = "anime-sama" ]; then
-                selected_src="$(printf "sibnet\nvidmoly\nsendvid\nstreamtape\nvk" | menu "Select server: " "" "$menu_extra_flags")"
+                avail_servers=$(printf "%s\n" "$ep_list" | grep "^${ep_no}[[:space:]]" | head -n 1 | awk -F'\t' '{print $5}' | tr ',' '\n' | sed '/^$/d')
+                [ -z "$avail_servers" ] && avail_servers=$(printf "vidmoly\nuqload\nearnvids\nvoe\nsendvid\nvk")
+                selected_src="$(printf "%s\n" "$avail_servers" | menu "Select server: " "" "$menu_extra_flags")"
                 if [ -n "$selected_src" ]; then
                     source_server="$selected_src"
                     ep_list=$(episodes_list "$anime_id")

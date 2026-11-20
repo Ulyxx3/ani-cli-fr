@@ -14,7 +14,7 @@ class SendvidExtractor(BaseExtractor):
         video_id = match.group(1) if match else video_id_or_url
 
         embed_url = f"https://sendvid.com/embed/{video_id}"
-        html = make_request(embed_url)
+        html = make_request(embed_url, referer="https://anime-sama.to/")
         if not html:
             return ""
 
@@ -32,4 +32,4 @@ class SendvidExtractor(BaseExtractor):
                     video_url = "https:" + video_url
                 return video_url
 
-        return embed_url
+        return ""
