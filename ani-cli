@@ -1,6 +1,6 @@
 #!/bin/sh
 
-version_number="5.1.5"
+version_number="5.1.8"
 
 # UI
 
@@ -154,11 +154,10 @@ dep_ch() {
 # checks for deps in order and returns the first available. format is "prog_a,prog_b,prog_c"
 dep_ch_failover() {
     [ -z "$1" ] && return 1
-    prog=$(printf "%s" "$1" | cut -d "," -f 1)
-    rest=$(printf "%s" "$1" | cut -s -d "," -f 2-)
+    prog=${1%%,*}
     command -v "$prog" >/dev/null 2>&1 && printf "%s" "$prog" && return 0
     [ -e "$prog" ] && printf "%s" "$prog" && return 0
-    dep_ch_failover "$rest"
+    [ "$1" != "$prog" ] && dep_ch_failover "${1#*,}"
 }
 
 call_python_scraper() {
@@ -306,9 +305,12 @@ deobfuscate_blob() (
     _output=""
     for _byte in $_bytes; do
         _char=$((_byte ^ $1))
-        _output="${_output}\\0$((_char / 64))$(((_char / 8) % 8))$((_char % 8))"
-        set -- "$@" "$1"
+        _output="${_output}\\0$((_char + 2 * (_char / 8) + 20 * (_char / 64)))"
         shift
+        if [ "$#" -eq 0 ]; then
+            printf "%b" "$_output" && _output="" || return
+            set -- 111 116 97 107 117 45 101 109 98 101 100 45 118 49
+        fi
     done
     printf "%b" "$_output"
 )
@@ -354,8 +356,10 @@ hianime_m3u8() {
     _m3u8_master="$(printf "%s" "$_json" | sed -nE 's|.*"src":"([^"]*\.m3u8[^"]*)".*|\1|p')"
     [ -z "$_m3u8_master" ] && return 1
     sub_link="$(printf "%s" "$_json" | sed 's|.*"subtitles":\[||; s|}\].*||; s|},{|}\n{|g' | grep -m 1 '"default":true' | sed -nE 's|.*"src":"([^"]*)".*|\1|p')"
+    _playlist="$(hianime_curl "$_m3u8_master" -e "$refr")"
     # quality variants are relative to the master playlist
-    links="$(hianime_curl "$_m3u8_master" -e "$refr" | sed 's|^#EXT-X-STREAM.*x||g; s|,.*|p|g; /^#/d; $!N; s|\n| >|;/EXT-X-I-FRAME/d' | sed "\|>https*://|!s|>|>${_m3u8_master%/*}/|" | sort -g -r -s)"
+    links="$(printf "%s\n" "$_playlist" | sed 's|^#EXT-X-STREAM.*x||g; s|,.*|p|g; /^#/d; $!N; s|\n| >|;/EXT-X-I-FRAME/d' | sed "\|>https*://|!s|>|>${_m3u8_master%/*}/|" | sort -g -r -s)"
+    audio_link="$(printf "%s\n" "$_playlist" | sed -nE '/^#EXT-X-MEDIA:TYPE=AUDIO,.*DEFAULT=YES/{s|.*URI="([^"]*)".*|\1|p;q;}' | sed "\|^https*://|!s|^|${_m3u8_master%/*}/|")"
     [ -n "$links" ]
 }
 
@@ -562,8 +566,8 @@ update_history() {
 download() {
     _name="$(printf "%s" "$2" | tr '<>:"/\\|?*' '_')"
     [ -n "$sub_link" ] && $curl_exe -sL -A "$agent" -e "$refr" --max-time 10 $cipher_flag "$sub_link" -o "$download_dir/$_name.vtt"
-    command -v "yt-dlp" >/dev/null && yt-dlp --referer "$refr" "$1" --no-skip-unavailable-fragments --fragment-retries infinite -N 16 -o "$download_dir/$_name.mp4" $3 && return 0
-    ffmpeg -extension_picky 0 -referer "$refr" -loglevel error -stats -i "$1" -c copy "$download_dir/$_name.mp4" $3
+    [ -z "$audio_link" ] && command -v "yt-dlp" >/dev/null && yt-dlp --referer "$refr" "$1" --no-skip-unavailable-fragments --fragment-retries infinite -N 16 -P "$download_dir" -P "temp:$tmp_dir" -o "$_name.mp4" $3 && return 0
+    ffmpeg -extension_picky 0 -referer "$refr" -loglevel error -stats -i "$1" ${audio_link:+-extension_picky 0 -referer "$refr" -i "$audio_link"} -c copy "$download_dir/$_name.mp4" $3
 }
 
 # mpv-android takes no options from the intent, so they go through a file the user includes in mpv.conf
@@ -572,7 +576,7 @@ android_mpv() {
     _conf_dir="/storage/emulated/0/mpv"
     if [ -w "${_conf_dir%/mpv}" ]; then
         [ -d "$_conf_dir" ] || mkdir "$_conf_dir"
-        printf "referrer=%s\n%s\n" "$refr" "${sub_link:+sub-file=$sub_link}" >"$_conf_dir/mpv.config.mp4"
+        printf "referrer=%s\n%s\n%s\n" "$refr" "${sub_link:+sub-file=$sub_link}" "${audio_link:+audio-file=$audio_link}" >"$_conf_dir/mpv.config.mp4"
     fi
     nohup am start --user 0 -a android.intent.action.VIEW -d "$video_link" -n is.xyz.mpv/.MPVActivity -e "title" "${anime_title} Episode ${ep_no}" $player_extra_flags >/dev/null 2>&1 &
 }
@@ -658,15 +662,15 @@ EOF
     wait
     # shellcheck disable=SC2086
     case "$player_function" in
-        debug) printf "All links:\n%s\nSelected link:\n%s\nSubtitles:\n%s\n" "$links" "$video_link" "$sub_link" ;;
+        debug) printf "All links:\n%s\nSelected link:\n%s\nAudio:\n%s\nSubtitles:\n%s\n" "$links" "$video_link" "$audio_link" "$sub_link" ;;
         android_mpv) android_mpv ;;
         android_vlc) nohup am start --user 0 -a android.intent.action.VIEW -d "$video_link" -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -e "title" "${anime_title} Episode ${ep_no}" $player_extra_flags >/dev/null 2>&1 & ;;
-        *flatpak*mpv*) flatpak run io.mpv.Mpv --referrer="$refr" ${sub_link:+--sub-file="$sub_link"} $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 & ;;
+        *flatpak*mpv*) flatpak run io.mpv.Mpv --referrer="$refr" ${audio_link:+--audio-file="$audio_link"} ${sub_link:+--sub-file="$sub_link"} $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 & ;;
         *mpv*)
             if [ "$no_detach" = 0 ]; then
-                nohup $player_function --referrer="$refr" ${sub_link:+--sub-file="$sub_link"} $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
+                nohup $player_function --referrer="$refr" ${audio_link:+--audio-file="$audio_link"} ${sub_link:+--sub-file="$sub_link"} $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
             else
-                $player_function --referrer="$refr" ${sub_link:+--sub-file="$sub_link"} $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
+                $player_function --referrer="$refr" ${audio_link:+--audio-file="$audio_link"} ${sub_link:+--sub-file="$sub_link"} $skip_flag $player_extra_flags --force-media-title="${anime_title} Episode ${ep_no}" "$video_link"
                 mpv_exitcode=$?
                 [ "$exit_after_play" = 1 ] && [ -z "$_range" ] && exit "$mpv_exitcode"
             fi
@@ -674,15 +678,16 @@ EOF
         *iina*)
             # mpv splits sub-files on ':', so the url has to be escaped for iina
             _sub_iina="$(printf "%s" "$sub_link" | sed 's|:|\\:|g')"
+            _audio_iina="$(printf "%s" "$audio_link" | sed 's|:|\\:|g')"
             if pgrep -f "IINA" >/dev/null 2>&1; then
                 # omit --keep-running when an IINA instance exists to prevent hanging
-                nohup $player_function --mpv-referrer="$refr" ${_sub_iina:+--mpv-sub-files="$_sub_iina"} $player_extra_flags --no-stdin --mpv-force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
+                nohup $player_function --mpv-referrer="$refr" ${_audio_iina:+--mpv-audio-files="$_audio_iina"} ${_sub_iina:+--mpv-sub-files="$_sub_iina"} $player_extra_flags --no-stdin --mpv-force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
             else
-                nohup $player_function --mpv-referrer="$refr" ${_sub_iina:+--mpv-sub-files="$_sub_iina"} $player_extra_flags --no-stdin --keep-running --mpv-force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
+                nohup $player_function --mpv-referrer="$refr" ${_audio_iina:+--mpv-audio-files="$_audio_iina"} ${_sub_iina:+--mpv-sub-files="$_sub_iina"} $player_extra_flags --no-stdin --keep-running --mpv-force-media-title="${anime_title} Episode ${ep_no}" "$video_link" >/dev/null 2>&1 &
             fi
             ;;
-        *vlc*) nohup $player_function --http-referrer="$refr" $player_extra_flags --play-and-exit --meta-title="${anime_title} Episode ${ep_no}" "$video_link" ${sub_link:+:input-slave="$sub_link"} >/dev/null 2>&1 & ;;
-        *yncpla*) nohup $player_function $player_extra_flags "$video_link" -- $skip_flag --referrer="$refr" ${sub_link:+--sub-file="$sub_link"} --force-media-title="${anime_title} Episode ${ep_no}" >/dev/null 2>&1 & ;;
+        *vlc*) nohup $player_function --http-referrer="$refr" $player_extra_flags --play-and-exit --meta-title="${anime_title} Episode ${ep_no}" "$video_link" :input-slave="${audio_link:+$audio_link#}$sub_link" >/dev/null 2>&1 & ;;
+        *yncpla*) nohup $player_function $player_extra_flags "$video_link" -- $skip_flag --referrer="$refr" ${audio_link:+--audio-file="$audio_link"} ${sub_link:+--sub-file="$sub_link"} --force-media-title="${anime_title} Episode ${ep_no}" >/dev/null 2>&1 & ;;
         download) "$player_function" "$video_link" "${anime_title} Episode ${ep_no}" $player_extra_flags ;;
         catt) nohup catt cast $player_extra_flags "$video_link" >/dev/null 2>&1 & ;;
         iSH)
@@ -746,6 +751,7 @@ agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 
 mode="${ANI_CLI_MODE:-sub}"
 download_dir="${ANI_CLI_DOWNLOAD_DIR:-.}"
+tmp_dir="${ANI_CLI_TMP_DIR:-.}"
 log_episode="${ANI_CLI_LOG:-1}"
 quality="${ANI_CLI_QUALITY:-best}"
 exact_match="${ANI_CLI_EXACT:-0}"
